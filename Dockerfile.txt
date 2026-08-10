@@ -1,22 +1,20 @@
 FROM python:3.10-slim
 
-# Install dependency sistem, FFmpeg, dan compiler C++
-RUN apt-get update && apt-get install -y \
+# Dependency sistem yang biasa dibutuhkan pytgcalls/yt-dlp (ffmpeg, dll)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     git \
-    curl \
-    build-essential \
-    python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy & install requirements
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy seluruh source code
 COPY . .
 
-# Jalankan Bot
+# Folder ini akan menjadi mount point Volume di Railway
+# supaya file session (CosaMusicBot.session) persisten antar deploy.
+RUN mkdir -p /app/sessions
+
 CMD ["python", "main.py"]
