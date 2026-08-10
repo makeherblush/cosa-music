@@ -2,7 +2,7 @@ import asyncio
 import logging
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from pytgcalls import PyTgCalls, filters as pytgcalls_filters
+from pytgcalls import PyTgCalls, idle, filters as pytgcalls_filters
 from pytgcalls.types import MediaStream as StreamType
 
 from config import API_ID, API_HASH, BOT_TOKEN, BOT_NAME
@@ -240,7 +240,7 @@ async def main():
     await app.start()
     await call_py.start()
     logger.info(f"🤖 {BOT_NAME} Berhasil Berjalan Sempurna!")
-    await asyncio.idle()
+    await idle()
 
 if __name__ == "__main__":
     asyncio.run(main())
