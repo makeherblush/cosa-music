@@ -2,7 +2,7 @@ import asyncio
 import logging
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from pytgcalls import PyTgCalls
+from pytgcalls import PyTgCalls, filters as pytgcalls_filters
 from pytgcalls.types import MediaStream as StreamType
 
 from config import API_ID, API_HASH, BOT_TOKEN, BOT_NAME
@@ -230,7 +230,7 @@ async def stop_cmd(client, message):
     await message.reply_text(f"⏹️ <b>[{BOT_NAME}] Musik dihentikan & bot keluar dari Voice Chat.</b>")
 
 # Event Handler pemutaran otomatis lagu berikutnya
-@call_py.on_stream_end()
+@call_py.on_update(pytgcalls_filters.stream_end)
 async def stream_end_handler(client, update):
     chat_id = getattr(update, 'chat_id', None)
     if chat_id:
