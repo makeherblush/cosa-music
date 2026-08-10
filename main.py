@@ -38,7 +38,7 @@ os.makedirs(SESSIONS_DIR, exist_ok=True)
 
 # Client Pyrogram & PyTgCalls Initialization
 app = Client(
-    "CosaMusicBotV2",
+    "CosaMusicBotV3",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN,
