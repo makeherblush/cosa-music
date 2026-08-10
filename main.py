@@ -74,8 +74,13 @@ async def play_next(chat_id: int):
             f"📭 <b>[{BOT_NAME}]</b> Antrean telah selesai. Bot keluar dari Voice Chat."
         )
 
+@app.on_message(filters.all, group=-1)
+async def debug_log_all(client, message):
+    logger.info(f"DEBUG: pesan masuk dari chat_id={message.chat.id}, text={message.text!r}")
+
 @app.on_message(filters.command("start"))
 async def start_cmd(client, message):
+    logger.info(f"DEBUG: /start diterima dari chat_id={message.chat.id}, user={message.from_user.id if message.from_user else 'unknown'}")
     keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("✨ Cara Penggunaan", callback_data="help_menu"),
