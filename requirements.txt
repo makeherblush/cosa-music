@@ -1,4 +1,4 @@
-pyrofork==2.3.42
+pyrofork>=2.3.69
 TgCrypto-pyrofork
 py-tgcalls>=2.2.5,<3.0.0
 yt-dlp
