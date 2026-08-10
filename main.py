@@ -3,7 +3,12 @@ import logging
 from hydrogram import Client, filters
 from hydrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pytgcalls import PyTgCalls
-from pytgcalls.types import MediaStream
+
+# Impor MediaStream dengan fallback agar aman di berbagai versi PyTgCalls v2.x
+try:
+    from pytgcalls.types import MediaStream
+except ImportError:
+    from pytgcalls.types import AudioPiped as MediaStream
 
 from config import API_ID, API_HASH, BOT_TOKEN, BOT_NAME
 
