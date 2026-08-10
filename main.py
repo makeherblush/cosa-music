@@ -3,7 +3,7 @@ import logging
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pytgcalls import PyTgCalls
-from pytgcalls.types import AudioPiped, MediaStream
+from pytgcalls.types import MediaStream
 
 from config import API_ID, API_HASH, BOT_TOKEN, BOT_NAME
 
@@ -17,13 +17,6 @@ call_py = PyTgCalls(app)
 
 # Memori Antrean Lagu per Chat ID
 queues = {}
-
-def get_stream_object(url: str):
-    """Helper untuk membuat objek stream yang kompatibel dengan versi PyTgCalls lama maupun baru."""
-    try:
-        return AudioPiped(url)
-    except Exception:
-        return MediaStream(url)
 
 def get_audio_url(query: str):
     """Mencari audio di YouTube menggunakan yt-dlp."""
@@ -42,7 +35,7 @@ def get_audio_url(query: str):
             raise Exception("Lagu tidak ditemukan.")
 
 async def leave_vc(chat_id: int):
-    """Helper untuk keluar dari Voice Chat secara fleksibel di berbagai versi."""
+    """Helper untuk keluar dari Voice Chat."""
     try:
         await call_py.leave_call(chat_id)
     except Exception:
@@ -59,8 +52,7 @@ async def play_next(chat_id: int):
         title = next_song['title']
 
         try:
-            stream = get_stream_object(url)
-            await call_py.play(chat_id, stream)
+            await call_py.play(chat_id, MediaStream(url))
             
             keyboard = InlineKeyboardMarkup([
                 [
@@ -202,8 +194,7 @@ async def play_cmd(client, message):
         ])
 
         if not is_active:
-            stream = get_stream_object(url)
-            await call_py.play(chat_id, stream)
+            await call_py.play(chat_id, MediaStream(url))
             await status_msg.edit_text(
                 f"▶️ <b>[{BOT_NAME}] Memutar Sekarang:</b>\n🎵 <b>{title}</b>",
                 reply_markup=keyboard
