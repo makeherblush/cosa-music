@@ -35,17 +35,14 @@ def get_audio_url(query: str):
             raise Exception("Lagu tidak ditemukan.")
 
 async def leave_vc(chat_id: int):
-    """Helper untuk keluar dari Voice Chat."""
+    """Keluar dari Voice Chat secara aman."""
     try:
         await call_py.leave_call(chat_id)
     except Exception:
-        try:
-            await call_py.leave_group_call(chat_id)
-        except Exception:
-            pass
+        pass
 
 async def play_next(chat_id: int):
-    """Memutar lagu berikutnya dari antrean secara otomatis (Auto-Replay / Auto-Next)."""
+    """Memutar lagu berikutnya dari antrean secara otomatis (Auto-Next)."""
     if chat_id in queues and len(queues[chat_id]) > 0:
         next_song = queues[chat_id].pop(0)
         url = next_song['url']
@@ -173,13 +170,12 @@ async def play_cmd(client, message):
         if chat_id not in queues:
             queues[chat_id] = []
 
+        # Cek apakah bot sedang berada di VC
         is_active = False
         try:
-            calls = getattr(call_py, 'calls', None)
-            if calls and chat_id in calls:
+            calls = getattr(call_py, 'calls', {})
+            if chat_id in calls:
                 is_active = True
-            elif hasattr(call_py, 'get_call'):
-                is_active = call_py.get_call(chat_id) is not None
         except Exception:
             is_active = False
 
@@ -239,12 +235,10 @@ async def stop_cmd(client, message):
     await leave_vc(chat_id)
     await message.reply_text(f"⏹️ <b>[{BOT_NAME}] Musik dihentikan & bot keluar dari Voice Chat.</b>")
 
-# Event Handler otomatis saat lagu selesai (Auto Replay/Next)
+# Event Handler pemutaran otomatis lagu berikutnya
 @call_py.on_stream_end()
 async def stream_end_handler(client, update):
     chat_id = getattr(update, 'chat_id', None)
-    if not chat_id and hasattr(update, 'call'):
-        chat_id = update.call.chat_id
     if chat_id:
         await play_next(chat_id)
 
