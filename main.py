@@ -36,6 +36,9 @@ def _start_dummy_server():
 
 threading.Thread(target=_start_dummy_server, daemon=True).start()
 
+SESSIONS_DIR = "/app/sessions"
+os.makedirs(SESSIONS_DIR, exist_ok=True)
+
 # PENTING: workdir menunjuk ke folder yang di-mount sebagai Volume di Railway
 # supaya session file (CosaMusicBot.session) persisten antar deploy/restart.
 app = Client(
@@ -43,7 +46,7 @@ app = Client(
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN,
-    workdir="/app/sessions",
+    workdir=SESSIONS_DIR,
 )
 call_py = PyTgCalls(app)
 
