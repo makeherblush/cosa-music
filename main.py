@@ -1,5 +1,8 @@
 import asyncio
 import logging
+import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -12,10 +15,31 @@ from config import API_ID, API_HASH, BOT_TOKEN, BOT_NAME
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(BOT_NAME)
 
+# --- Dummy HTTP server ---
+# Railway (dan platform sejenis) kadang mengharapkan container listen di sebuah PORT.
+# Bot Telegram ini tidak butuh web server, tapi kita buka port kosong ini
+# supaya Railway tidak menganggap proses "tidak sehat" dan mematikannya.
+class _HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+    def log_message(self, format, *args):
+        pass  # matikan log bawaan HTTP server biar tidak spam
+
+def _start_dummy_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+    logger.info(f"🌐 Dummy HTTP server listening on port {port} (untuk keperluan Railway healthcheck)")
+    server.serve_forever()
+
+threading.Thread(target=_start_dummy_server, daemon=True).start()
+
 # PENTING: workdir menunjuk ke folder yang di-mount sebagai Volume di Railway
 # supaya session file (CosaMusicBot.session) persisten antar deploy/restart.
 app = Client(
-    "CosaMusicBot",
+    "CosaMusicBotV2",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN,
@@ -90,79 +114,88 @@ async def debug_log_all(client, message):
 @app.on_message(filters.command("start"))
 async def start_cmd(client, message):
     logger.info(f"DEBUG: /start diterima dari chat_id={message.chat.id}, user={message.from_user.id if message.from_user else 'unknown'}")
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("✨ Cara Penggunaan", callback_data="help_menu"),
-            InlineKeyboardButton("📜 Daftar Perintah", callback_data="cmd_menu")
-        ],
-        [
-            InlineKeyboardButton("➕ Tambahkan Bot ke Grup", url=f"https://t.me/{client.me.username}?startgroup=true")
-        ]
-    ])
-
-    welcome_text = (
-        f"🎧 <b>Selamat Datang di {BOT_NAME}!</b>\n\n"
-        "Bot pemutar musik Voice Chat dengan sistem antrean otomatis dan kontrol tombol interaktif.\n\n"
-        "Gunakan tombol di bawah untuk melihat navigasi lebih lanjut!"
-    )
-    await message.reply_text(welcome_text, reply_markup=keyboard)
-
-@app.on_callback_query()
-async def callback_handler(client, callback_query):
-    data = callback_query.data
-    chat_id = callback_query.message.chat.id
-
-    if data == "help_menu":
-        await callback_query.message.edit_text(
-            f"📖 <b>Bantuan {BOT_NAME}</b>\n\n"
-            "1. Masukkan bot ke dalam Grup.\n"
-            "2. Nyalakan Voice Chat (VC) di grup tersebut.\n"
-            "3. Ketik <code>/play [judul lagu]</code> untuk memutar musik.\n"
-            "4. Bot akan memutar lagu selanjutnya dari antrean secara otomatis!",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Kembali", callback_data="main_menu")]])
-        )
-    elif data == "cmd_menu":
-        await callback_query.message.edit_text(
-            f"🛠️ <b>Daftar Perintah {BOT_NAME}:</b>\n\n"
-            "• <code>/play [judul]</code> - Putar atau tambahkan ke antrean\n"
-            "• <code>/skip</code> - Lewati lagu aktif\n"
-            "• <code>/queue</code> - Lihat daftar antrean lagu\n"
-            "• <code>/stop</code> - Hentikan pemutaran & keluar VC",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Kembali", callback_data="main_menu")]])
-        )
-    elif data == "main_menu":
+    try:
+        me = await client.get_me()
         keyboard = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("✨ Cara Penggunaan", callback_data="help_menu"),
                 InlineKeyboardButton("📜 Daftar Perintah", callback_data="cmd_menu")
             ],
             [
-                InlineKeyboardButton("➕ Tambahkan Bot ke Grup", url=f"https://t.me/{client.me.username}?startgroup=true")
+                InlineKeyboardButton("➕ Tambahkan Bot ke Grup", url=f"https://t.me/{me.username}?startgroup=true")
             ]
         ])
-        await callback_query.message.edit_text(
-            f"🎧 <b>Selamat Datang kembali di {BOT_NAME}!</b>\n\nSilakan pilih menu di bawah:",
-            reply_markup=keyboard
+
+        welcome_text = (
+            f"🎧 <b>Selamat Datang di {BOT_NAME}!</b>\n\n"
+            "Bot pemutar musik Voice Chat dengan sistem antrean otomatis dan kontrol tombol interaktif.\n\n"
+            "Gunakan tombol di bawah untuk melihat navigasi lebih lanjut!"
         )
-    elif data == "btn_skip":
-        await callback_query.answer("Melewati lagu...")
-        await play_next(chat_id)
-    elif data == "btn_stop":
-        await callback_query.answer("Menghentikan pemutaran...")
-        if chat_id in queues:
-            queues[chat_id].clear()
-            del queues[chat_id]
-        await leave_vc(chat_id)
-        await callback_query.message.edit_text(f"⏹️ <b>[{BOT_NAME}] Musik dihentikan & bot keluar dari Voice Chat.</b>")
-    elif data == "btn_queue":
-        if chat_id not in queues or len(queues[chat_id]) == 0:
-            await callback_query.answer("Antrean saat ini kosong!", show_alert=True)
-        else:
-            text = f"📜 <b>[{BOT_NAME}] DAFTAR ANTREAN:</b>\n\n"
-            for idx, song in enumerate(queues[chat_id], 1):
-                text += f"<b>{idx}.</b> {song['title']}\n"
-            await callback_query.answer("Membuka antrean", show_alert=False)
-            await callback_query.message.reply_text(text)
+        await message.reply_text(welcome_text, reply_markup=keyboard)
+        logger.info("DEBUG: /start berhasil dibalas")
+    except Exception as e:
+        logger.exception(f"ERROR saat memproses /start: {e}")
+
+@app.on_callback_query()
+async def callback_handler(client, callback_query):
+    data = callback_query.data
+    chat_id = callback_query.message.chat.id
+
+    try:
+        if data == "help_menu":
+            await callback_query.message.edit_text(
+                f"📖 <b>Bantuan {BOT_NAME}</b>\n\n"
+                "1. Masukkan bot ke dalam Grup.\n"
+                "2. Nyalakan Voice Chat (VC) di grup tersebut.\n"
+                "3. Ketik <code>/play [judul lagu]</code> untuk memutar musik.\n"
+                "4. Bot akan memutar lagu selanjutnya dari antrean secara otomatis!",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Kembali", callback_data="main_menu")]])
+            )
+        elif data == "cmd_menu":
+            await callback_query.message.edit_text(
+                f"🛠️ <b>Daftar Perintah {BOT_NAME}:</b>\n\n"
+                "• <code>/play [judul]</code> - Putar atau tambahkan ke antrean\n"
+                "• <code>/skip</code> - Lewati lagu aktif\n"
+                "• <code>/queue</code> - Lihat daftar antrean lagu\n"
+                "• <code>/stop</code> - Hentikan pemutaran & keluar VC",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Kembali", callback_data="main_menu")]])
+            )
+        elif data == "main_menu":
+            me = await client.get_me()
+            keyboard = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("✨ Cara Penggunaan", callback_data="help_menu"),
+                    InlineKeyboardButton("📜 Daftar Perintah", callback_data="cmd_menu")
+                ],
+                [
+                    InlineKeyboardButton("➕ Tambahkan Bot ke Grup", url=f"https://t.me/{me.username}?startgroup=true")
+                ]
+            ])
+            await callback_query.message.edit_text(
+                f"🎧 <b>Selamat Datang kembali di {BOT_NAME}!</b>\n\nSilakan pilih menu di bawah:",
+                reply_markup=keyboard
+            )
+        elif data == "btn_skip":
+            await callback_query.answer("Melewati lagu...")
+            await play_next(chat_id)
+        elif data == "btn_stop":
+            await callback_query.answer("Menghentikan pemutaran...")
+            if chat_id in queues:
+                queues[chat_id].clear()
+                del queues[chat_id]
+            await leave_vc(chat_id)
+            await callback_query.message.edit_text(f"⏹️ <b>[{BOT_NAME}] Musik dihentikan & bot keluar dari Voice Chat.</b>")
+        elif data == "btn_queue":
+            if chat_id not in queues or len(queues[chat_id]) == 0:
+                await callback_query.answer("Antrean saat ini kosong!", show_alert=True)
+            else:
+                text = f"📜 <b>[{BOT_NAME}] DAFTAR ANTREAN:</b>\n\n"
+                for idx, song in enumerate(queues[chat_id], 1):
+                    text += f"<b>{idx}.</b> {song['title']}\n"
+                await callback_query.answer("Membuka antrean", show_alert=False)
+                await callback_query.message.reply_text(text)
+    except Exception as e:
+        logger.exception(f"ERROR di callback_handler (data={data}): {e}")
 
 @app.on_message(filters.command("play") & filters.group)
 async def play_cmd(client, message):
