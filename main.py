@@ -1,7 +1,7 @@
 import asyncio
 import logging
-from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from hydrogram import Client, filters
+from hydrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pytgcalls import PyTgCalls
 from pytgcalls.types import MediaStream
 
@@ -11,7 +11,7 @@ from config import API_ID, API_HASH, BOT_TOKEN, BOT_NAME
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(BOT_NAME)
 
-# Inisialisasi Pyrogram & PyTgCalls
+# Inisialisasi Hydrogram Client & PyTgCalls
 app = Client("CosaMusicBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 call_py = PyTgCalls(app)
 
@@ -42,7 +42,7 @@ async def leave_vc(chat_id: int):
         pass
 
 async def play_next(chat_id: int):
-    """Memutar lagu berikutnya dari antrean secara otomatis (Auto-Next)."""
+    """Memutar lagu berikutnya dari antrean secara otomatis (Auto-Next / Auto-Replay)."""
     if chat_id in queues and len(queues[chat_id]) > 0:
         next_song = queues[chat_id].pop(0)
         url = next_song['url']
@@ -170,7 +170,7 @@ async def play_cmd(client, message):
         if chat_id not in queues:
             queues[chat_id] = []
 
-        # Cek apakah bot sedang berada di VC
+        # Pengecekan koneksi voice chat aktif
         is_active = False
         try:
             calls = getattr(call_py, 'calls', {})
@@ -235,10 +235,12 @@ async def stop_cmd(client, message):
     await leave_vc(chat_id)
     await message.reply_text(f"⏹️ <b>[{BOT_NAME}] Musik dihentikan & bot keluar dari Voice Chat.</b>")
 
-# Event Handler pemutaran otomatis lagu berikutnya
+# Event Handler otomatis saat lagu selesai diputar
 @call_py.on_stream_end()
 async def stream_end_handler(client, update):
     chat_id = getattr(update, 'chat_id', None)
+    if not chat_id and hasattr(update, 'call'):
+        chat_id = update.call.chat_id
     if chat_id:
         await play_next(chat_id)
 
