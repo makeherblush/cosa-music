@@ -3,16 +3,7 @@ import logging
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pytgcalls import PyTgCalls
-
-# Impor fleksibel agar tidak crash di PyTgCalls v3/Git
-try:
-    from pytgcalls.types import AudioPiped as StreamType
-except ImportError:
-    try:
-        from pytgcalls.types import MediaStream as StreamType
-    except ImportError:
-        # Pada PyTgCalls v3 terbaru, play() bisa langsung menerima URL string
-        StreamType = lambda url: url
+from pytgcalls.types import MediaStream as StreamType
 
 from config import API_ID, API_HASH, BOT_TOKEN, BOT_NAME
 
