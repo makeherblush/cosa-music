@@ -3,7 +3,16 @@ import logging
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pytgcalls import PyTgCalls
-from pytgcalls.types import AudioPiped
+
+# Impor fleksibel agar tidak crash di PyTgCalls v3/Git
+try:
+    from pytgcalls.types import AudioPiped as StreamType
+except ImportError:
+    try:
+        from pytgcalls.types import MediaStream as StreamType
+    except ImportError:
+        # Pada PyTgCalls v3 terbaru, play() bisa langsung menerima URL string
+        StreamType = lambda url: url
 
 from config import API_ID, API_HASH, BOT_TOKEN, BOT_NAME
 
@@ -11,17 +20,12 @@ from config import API_ID, API_HASH, BOT_TOKEN, BOT_NAME
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(BOT_NAME)
 
-# Inisialisasi Client Pyrogram
 app = Client("CosaMusicBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-
-# Inisialisasi PyTgCalls (V3)
 call_py = PyTgCalls(app)
 
-# Memori Antrean Lagu per Chat ID
 queues = {}
 
 def get_audio_url(query: str):
-    """Mencari audio di YouTube menggunakan yt-dlp."""
     import yt_dlp
     ydl_opts = {
         'format': 'bestaudio/best',
@@ -37,21 +41,19 @@ def get_audio_url(query: str):
             raise Exception("Lagu tidak ditemukan.")
 
 async def leave_vc(chat_id: int):
-    """Keluar dari Voice Chat."""
     try:
         await call_py.leave_call(chat_id)
     except Exception:
         pass
 
 async def play_next(chat_id: int):
-    """Memutar lagu berikutnya dari antrean secara otomatis (Auto-Next / Auto-Replay)."""
     if chat_id in queues and len(queues[chat_id]) > 0:
         next_song = queues[chat_id].pop(0)
         url = next_song['url']
         title = next_song['title']
 
         try:
-            await call_py.play(chat_id, AudioPiped(url))
+            await call_py.play(chat_id, StreamType(url))
             
             keyboard = InlineKeyboardMarkup([
                 [
@@ -191,7 +193,7 @@ async def play_cmd(client, message):
         ])
 
         if not is_active:
-            await call_py.play(chat_id, AudioPiped(url))
+            await call_py.play(chat_id, StreamType(url))
             await status_msg.edit_text(
                 f"▶️ <b>[{BOT_NAME}] Memutar Sekarang:</b>\n🎵 <b>{title}</b>",
                 reply_markup=keyboard
@@ -236,7 +238,7 @@ async def stop_cmd(client, message):
     await leave_vc(chat_id)
     await message.reply_text(f"⏹️ <b>[{BOT_NAME}] Musik dihentikan & bot keluar dari Voice Chat.</b>")
 
-# Event Handler otomatis lagu selesai
+# Event Handler pemutaran otomatis lagu berikutnya
 @call_py.on_stream_end()
 async def stream_end_handler(client, update):
     chat_id = getattr(update, 'chat_id', None)
