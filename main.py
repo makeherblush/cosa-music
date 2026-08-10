@@ -3,12 +3,7 @@ import logging
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pytgcalls import PyTgCalls
-
-# Impor fleksibel mengikuti versi PyTgCalls terbaru dari Git
-try:
-    from pytgcalls.types import AudioPiped as StreamType
-except ImportError:
-    from pytgcalls.types import MediaStream as StreamType
+from pytgcalls.types.input_stream import InputStream, InputAudioStream
 
 from config import API_ID, API_HASH, BOT_TOKEN, BOT_NAME
 
@@ -38,7 +33,7 @@ def get_audio_url(query: str):
 
 async def leave_vc(chat_id: int):
     try:
-        await call_py.leave_call(chat_id)
+        await call_py.leave_group_call(chat_id)
     except Exception:
         pass
 
@@ -49,7 +44,12 @@ async def play_next(chat_id: int):
         title = next_song['title']
 
         try:
-            await call_py.play(chat_id, StreamType(url))
+            await call_py.change_stream(
+                chat_id,
+                InputStream(
+                    InputAudioStream(url)
+                )
+            )
             
             keyboard = InlineKeyboardMarkup([
                 [
@@ -172,8 +172,8 @@ async def play_cmd(client, message):
 
         is_active = False
         try:
-            calls = getattr(call_py, 'calls', {})
-            if chat_id in calls:
+            active_calls = call_py.active_calls
+            if chat_id in active_calls:
                 is_active = True
         except Exception:
             is_active = False
@@ -189,7 +189,12 @@ async def play_cmd(client, message):
         ])
 
         if not is_active:
-            await call_py.play(chat_id, StreamType(url))
+            await call_py.join_group_call(
+                chat_id,
+                InputStream(
+                    InputAudioStream(url)
+                )
+            )
             await status_msg.edit_text(
                 f"▶️ <b>[{BOT_NAME}] Memutar Sekarang:</b>\n🎵 <b>{title}</b>",
                 reply_markup=keyboard
@@ -237,8 +242,6 @@ async def stop_cmd(client, message):
 @call_py.on_stream_end()
 async def stream_end_handler(client, update):
     chat_id = getattr(update, 'chat_id', None)
-    if not chat_id and hasattr(update, 'call'):
-        chat_id = update.call.chat_id
     if chat_id:
         await play_next(chat_id)
 
