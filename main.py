@@ -11,7 +11,7 @@ from config import API_ID, API_HASH, BOT_TOKEN, BOT_NAME
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(BOT_NAME)
 
-app = Client("CosaMusicBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Client("CosaMusicBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True)
 call_py = PyTgCalls(app)
 
 queues = {}
