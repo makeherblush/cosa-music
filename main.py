@@ -2,7 +2,8 @@ import asyncio
 import logging
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from ntgcalls import NTgCalls
+from pytgcalls import PyTgCalls
+from pytgcalls.types import AudioPiped
 
 from config import API_ID, API_HASH, BOT_TOKEN, BOT_NAME
 
@@ -10,9 +11,11 @@ from config import API_ID, API_HASH, BOT_TOKEN, BOT_NAME
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(BOT_NAME)
 
-# Inisialisasi Pyrogram & NTgCalls
+# Inisialisasi Client Pyrogram
 app = Client("CosaMusicBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-call_py = NTgCalls(app)
+
+# Inisialisasi PyTgCalls (V3)
+call_py = PyTgCalls(app)
 
 # Memori Antrean Lagu per Chat ID
 queues = {}
@@ -36,7 +39,7 @@ def get_audio_url(query: str):
 async def leave_vc(chat_id: int):
     """Keluar dari Voice Chat."""
     try:
-        await call_py.stop(chat_id)
+        await call_py.leave_call(chat_id)
     except Exception:
         pass
 
@@ -48,7 +51,7 @@ async def play_next(chat_id: int):
         title = next_song['title']
 
         try:
-            await call_py.play(chat_id, url)
+            await call_py.play(chat_id, AudioPiped(url))
             
             keyboard = InlineKeyboardMarkup([
                 [
@@ -169,8 +172,13 @@ async def play_cmd(client, message):
         if chat_id not in queues:
             queues[chat_id] = []
 
-        # Cek apakah bot sedang aktif memutar lagu di chat ini
-        is_active = call_py.is_connected(chat_id)
+        is_active = False
+        try:
+            calls = getattr(call_py, 'calls', {})
+            if chat_id in calls:
+                is_active = True
+        except Exception:
+            is_active = False
 
         keyboard = InlineKeyboardMarkup([
             [
@@ -183,7 +191,7 @@ async def play_cmd(client, message):
         ])
 
         if not is_active:
-            await call_py.play(chat_id, url)
+            await call_py.play(chat_id, AudioPiped(url))
             await status_msg.edit_text(
                 f"▶️ <b>[{BOT_NAME}] Memutar Sekarang:</b>\n🎵 <b>{title}</b>",
                 reply_markup=keyboard
@@ -228,7 +236,7 @@ async def stop_cmd(client, message):
     await leave_vc(chat_id)
     await message.reply_text(f"⏹️ <b>[{BOT_NAME}] Musik dihentikan & bot keluar dari Voice Chat.</b>")
 
-# Event Handler otomatis saat lagu selesai (Auto Replay/Next)
+# Event Handler otomatis lagu selesai
 @call_py.on_stream_end()
 async def stream_end_handler(client, update):
     chat_id = getattr(update, 'chat_id', None)
