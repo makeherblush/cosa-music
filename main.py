@@ -1,10 +1,9 @@
 import asyncio
 import logging
 from pyrogram import Client, filters
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pytgcalls import PyTgCalls
-from pytgcalls.types import AudioPiped
-from pytgcalls.types.input_stream.quality import HighQualityAudio
-import yt_dlp
+from pytgcalls.types import MediaStream
 
 from config import API_ID, API_HASH, BOT_TOKEN, BOT_NAME
 
@@ -17,11 +16,11 @@ app = Client("CosaMusicBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOK
 call_py = PyTgCalls(app)
 
 # Memori Antrean Lagu per Chat ID
-# Format: { chat_id: [ {"title": "Judul", "url": "Link_Stream"}, ... ] }
 queues = {}
 
 def get_audio_url(query: str):
     """Mencari audio di YouTube menggunakan yt-dlp."""
+    import yt_dlp
     ydl_opts = {
         'format': 'bestaudio/best',
         'quiet': True,
@@ -36,7 +35,7 @@ def get_audio_url(query: str):
             raise Exception("Lagu tidak ditemukan.")
 
 async def play_next(chat_id: int):
-    """Memutar lagu berikutnya dari antrean."""
+    """Memutar lagu berikutnya dari antrean secara otomatis (Auto-Replay / Auto-Next)."""
     if chat_id in queues and len(queues[chat_id]) > 0:
         next_song = queues[chat_id].pop(0)
         url = next_song['url']
@@ -45,11 +44,24 @@ async def play_next(chat_id: int):
         try:
             await call_py.play(
                 chat_id,
-                AudioPiped(url, high_quality_audio=HighQualityAudio())
+                MediaStream(url)
             )
+            
+            # Tombol kontrol pemutar musik otomatis
+            keyboard = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("⏭️ Skip", callback_data="btn_skip"),
+                    InlineKeyboardButton("⏹️ Stop", callback_data="btn_stop")
+                ],
+                [
+                    InlineKeyboardButton("📜 Cek Antrean", callback_data="btn_queue")
+                ]
+            ])
+            
             await app.send_message(
                 chat_id, 
-                f"🎶 <b>[{BOT_NAME}] Memutar Lagu Berikutnya:</b>\n🎵 <b>{title}</b>"
+                f"🎶 <b>[{BOT_NAME}] Memutar Lagu Berikutnya:</b>\n🎵 <b>{title}</b>",
+                reply_markup=keyboard
             )
         except Exception as e:
             logger.error(f"Gagal memutar lagu berikutnya di {chat_id}: {e}")
@@ -59,25 +71,99 @@ async def play_next(chat_id: int):
         if chat_id in queues:
             del queues[chat_id]
         try:
-            await call_py.leave_group_call(chat_id)
-            await app.send_message(
-                chat_id, 
-                f"📭 <b>[{BOT_NAME}]</b> Antrean telah selesai. Bot keluar dari Voice Chat."
-            )
+            await call_py.leave_call(chat_id)
         except Exception:
-            pass
+            try:
+                await call_py.leave_group_call(chat_id)
+            except Exception:
+                pass
+        
+        await app.send_message(
+            chat_id, 
+            f"📭 <b>[{BOT_NAME}]</b> Antrean telah selesai. Bot keluar dari Voice Chat."
+        )
 
 @app.on_message(filters.command("start"))
 async def start_cmd(client, message):
-    await message.reply_text(
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✨ Cara Penggunaan", callback_data="help_menu"),
+            InlineKeyboardButton("📜 Daftar Perintah", callback_data="cmd_menu")
+        ],
+        [
+            InlineKeyboardButton("➕ Tambahkan Bot ke Grup", url=f"https://t.me/{client.me.username}?startgroup=true")
+        ]
+    ])
+    
+    welcome_text = (
         f"🎧 <b>Selamat Datang di {BOT_NAME}!</b>\n\n"
-        "Bot pemutar musik Voice Chat dengan sistem antrean otomatis.\n\n"
-        "<b>Perintah di Grup:</b>\n"
-        "• <code>/play [judul lagu]</code> - Putar lagu atau masukkan ke antrean\n"
-        "• <code>/skip</code> - Lewati lagu yang sedang berputar\n"
-        "• <code>/queue</code> - Lihat daftar antrean lagu\n"
-        "• <code>/stop</code> - Hentikan musik & keluarkan bot dari VC"
+        "Bot pemutar musik Voice Chat dengan sistem antrean otomatis dan kontrol tombol interaktif.\n\n"
+        "Gunakan tombol di bawah untuk melihat informasi lebih lanjut!"
     )
+    await message.reply_text(welcome_text, reply_markup=keyboard)
+
+@app.on_callback_query()
+async def callback_handler(client, callback_query):
+    data = callback_query.data
+    chat_id = callback_query.message.chat.id
+    
+    if data == "help_menu":
+        await callback_query.message.edit_text(
+            f"📖 <b>Bantuan {BOT_NAME}</b>\n\n"
+            "1. Masukkan bot ke dalam Grup.\n"
+            "2. Nyalakan Voice Chat (VC) di grup tersebut.\n"
+            "3. Ketik <code>/play [judul lagu]</code> untuk mulai mendengarkan.\n"
+            "4. Sistem akan otomatis memutar lagu selanjutnya dari antrean!",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Kembali", callback_data="main_menu")]])
+        )
+    elif data == "cmd_menu":
+        await callback_query.message.edit_text(
+            f"🛠️ <b>Daftar Perintah {BOT_NAME}:</b>\n\n"
+            "• <code>/play [judul]</code> - Putar atau antrekan lagu\n"
+            "• <code>/skip</code> - Lewati lagu aktif\n"
+            "• <code>/queue</code> - Lihat daftar antrean\n"
+            "• <code>/stop</code> - Hentikan musik & keluar VC",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Kembali", callback_data="main_menu")]])
+        )
+    elif data == "main_menu":
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✨ Cara Penggunaan", callback_data="help_menu"),
+                InlineKeyboardButton("📜 Daftar Perintah", callback_data="cmd_menu")
+            ],
+            [
+                InlineKeyboardButton("➕ Tambahkan Bot ke Grup", url=f"https://t.me/{client.me.username}?startgroup=true")
+            ]
+        ])
+        await callback_query.message.edit_text(
+            f"🎧 <b>Selamat Datang kembali di {BOT_NAME}!</b>\n\nSilakan pilih menu di bawah:",
+            reply_markup=keyboard
+        )
+    elif data == "btn_skip":
+        await callback_query.answer("Melewati lagu...")
+        await play_next(chat_id)
+    elif data == "btn_stop":
+        await callback_query.answer("Menghentikan musik...")
+        if chat_id in queues:
+            queues[chat_id].clear()
+            del queues[chat_id]
+        try:
+            await call_py.leave_call(chat_id)
+        except Exception:
+            try:
+                await call_py.leave_group_call(chat_id)
+            except Exception:
+                pass
+        await callback_query.message.edit_text(f"⏹️ <b>[{BOT_NAME}] Musik dihentikan & bot keluar dari Voice Chat.</b>")
+    elif data == "btn_queue":
+        if chat_id not in queues or len(queues[chat_id]) == 0:
+            await callback_query.answer("Antrean kosong!", show_alert=True)
+        else:
+            text = f"📜 <b>[{BOT_NAME}] DAFTAR ANTREAN:</b>\n\n"
+            for idx, song in enumerate(queues[chat_id], 1):
+                text += f"<b>{idx}.</b> {song['title']}\n"
+            await callback_query.answer("Membuka daftar antrean", show_alert=False)
+            await callback_query.message.reply_text(text)
 
 @app.on_message(filters.command("play") & filters.group)
 async def play_cmd(client, message):
@@ -94,27 +180,40 @@ async def play_cmd(client, message):
         if chat_id not in queues:
             queues[chat_id] = []
 
+        is_active = False
         try:
             current_call = call_py.get_call(chat_id)
             is_active = current_call is not None
         except Exception:
             is_active = False
 
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("⏭️ Skip", callback_data="btn_skip"),
+                InlineKeyboardButton("⏹️ Stop", callback_data="btn_stop")
+            ],
+            [
+                InlineKeyboardButton("📜 Cek Antrean", callback_data="btn_queue")
+            ]
+        ])
+
         if not is_active:
             # Langsung putar lagu jika VC belum aktif
             await call_py.play(
                 chat_id,
-                AudioPiped(url, high_quality_audio=HighQualityAudio())
+                MediaStream(url)
             )
             await status_msg.edit_text(
-                f"▶️ <b>[{BOT_NAME}] Memutar Sekarang:</b>\n🎵 <b>{title}</b>"
+                f"▶️ <b>[{BOT_NAME}] Memutar Sekarang:</b>\n🎵 <b>{title}</b>",
+                reply_markup=keyboard
             )
         else:
             # Tambahkan ke antrean jika sedang ada lagu yang berputar
             queues[chat_id].append({"title": title, "url": url})
             pos = len(queues[chat_id])
             await status_msg.edit_text(
-                f"➕ <b>[{BOT_NAME}] Ditambahkan ke Antrean (#{pos}):</b>\n🎵 <b>{title}</b>"
+                f"➕ <b>[{BOT_NAME}] Ditambahkan ke Antrean (#{pos}):</b>\n🎵 <b>{title}</b>",
+                reply_markup=keyboard
             )
 
     except Exception as e:
@@ -136,7 +235,8 @@ async def queue_cmd(client, message):
     for idx, song in enumerate(queues[chat_id], 1):
         text += f"<b>{idx}.</b> {song['title']}\n"
 
-    await message.reply_text(text)
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⏹️ Hentikan Pemutaran", callback_data="btn_stop")]])
+    await message.reply_text(text, reply_markup=keyboard)
 
 @app.on_message(filters.command("stop") & filters.group)
 async def stop_cmd(client, message):
@@ -146,12 +246,16 @@ async def stop_cmd(client, message):
         del queues[chat_id]
 
     try:
-        await call_py.leave_group_call(chat_id)
+        await call_py.leave_call(chat_id)
         await message.reply_text(f"⏹️ <b>[{BOT_NAME}] Musik dihentikan & bot keluar dari Voice Chat.</b>")
     except Exception:
-        await message.reply_text(f"❌ <b>[{BOT_NAME}]</b> Bot tidak sedang berada di Voice Chat.")
+        try:
+            await call_py.leave_group_call(chat_id)
+            await message.reply_text(f"⏹️ <b>[{BOT_NAME}] Musik dihentikan & bot keluar dari Voice Chat.</b>")
+        except Exception:
+            await message.reply_text(f"❌ <b>[{BOT_NAME}]</b> Bot tidak sedang berada di Voice Chat.")
 
-# Event Handler saat lagu selesai
+# Event Handler otomatis saat lagu selesai (Auto Replay/Next)
 @call_py.on_stream_end()
 async def stream_end_handler(client, update):
     chat_id = update.chat_id
