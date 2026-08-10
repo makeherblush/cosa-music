@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from pyrogram import Client, filters
+from pyrogram.errors import FloodWait
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pytgcalls import PyTgCalls, idle, filters as pytgcalls_filters
 from pytgcalls.types import MediaStream as StreamType
@@ -11,7 +12,15 @@ from config import API_ID, API_HASH, BOT_TOKEN, BOT_NAME
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(BOT_NAME)
 
-app = Client("CosaMusicBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True)
+# PENTING: workdir menunjuk ke folder yang di-mount sebagai Volume di Railway
+# supaya session file (CosaMusicBot.session) persisten antar deploy/restart.
+app = Client(
+    "CosaMusicBot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN,
+    workdir="/app/sessions",
+)
 call_py = PyTgCalls(app)
 
 queues = {}
@@ -45,7 +54,7 @@ async def play_next(chat_id: int):
 
         try:
             await call_py.play(chat_id, StreamType(url))
-            
+
             keyboard = InlineKeyboardMarkup([
                 [
                     InlineKeyboardButton("⏭️ Skip", callback_data="btn_skip"),
@@ -55,9 +64,9 @@ async def play_next(chat_id: int):
                     InlineKeyboardButton("📜 Cek Antrean", callback_data="btn_queue")
                 ]
             ])
-            
+
             await app.send_message(
-                chat_id, 
+                chat_id,
                 f"🎶 <b>[{BOT_NAME}] Memutar Lagu Berikutnya:</b>\n🎵 <b>{title}</b>",
                 reply_markup=keyboard
             )
@@ -67,10 +76,10 @@ async def play_next(chat_id: int):
     else:
         if chat_id in queues:
             del queues[chat_id]
-        
+
         await leave_vc(chat_id)
         await app.send_message(
-            chat_id, 
+            chat_id,
             f"📭 <b>[{BOT_NAME}]</b> Antrean telah selesai. Bot keluar dari Voice Chat."
         )
 
@@ -90,7 +99,7 @@ async def start_cmd(client, message):
             InlineKeyboardButton("➕ Tambahkan Bot ke Grup", url=f"https://t.me/{client.me.username}?startgroup=true")
         ]
     ])
-    
+
     welcome_text = (
         f"🎧 <b>Selamat Datang di {BOT_NAME}!</b>\n\n"
         "Bot pemutar musik Voice Chat dengan sistem antrean otomatis dan kontrol tombol interaktif.\n\n"
@@ -102,7 +111,7 @@ async def start_cmd(client, message):
 async def callback_handler(client, callback_query):
     data = callback_query.data
     chat_id = callback_query.message.chat.id
-    
+
     if data == "help_menu":
         await callback_query.message.edit_text(
             f"📖 <b>Bantuan {BOT_NAME}</b>\n\n"
@@ -242,7 +251,22 @@ async def stream_end_handler(client, update):
         await play_next(chat_id)
 
 async def main():
-    await app.start()
+    # Retry loop khusus untuk FloodWait saat login, supaya proses TIDAK crash
+    # dan Railway TIDAK auto-restart berkali-kali (yang justru memperparah flood).
+    while True:
+        try:
+            await app.start()
+            break
+        except FloodWait as e:
+            wait_time = e.value + 5
+            logger.warning(
+                f"⏳ Kena FloodWait dari Telegram. Menunggu {wait_time} detik sebelum mencoba lagi..."
+            )
+            await asyncio.sleep(wait_time)
+        except Exception as e:
+            logger.error(f"Gagal start client: {e}. Mencoba lagi dalam 15 detik...")
+            await asyncio.sleep(15)
+
     await call_py.start()
     logger.info(f"🤖 {BOT_NAME} Berhasil Berjalan Sempurna!")
     await idle()
