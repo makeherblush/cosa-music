@@ -1,0 +1,20 @@
+FROM python:3.10-slim
+
+# Install dependency sistem & FFmpeg
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy & install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy seluruh source code cosa-music
+COPY . .
+
+# Jalankan Cosa Music Bot
+CMD ["python", "main.py"]
