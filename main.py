@@ -7,7 +7,7 @@ from pyrogram import Client, filters
 from pyrogram.errors import FloodWait
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pytgcalls import PyTgCalls, idle, filters as pytgcalls_filters
-from pytgcalls.types import MediaStream as StreamType
+from pytgcalls.types import MediaStream, AudioQuality
 
 from config import API_ID, API_HASH, BOT_TOKEN, BOT_NAME
 
@@ -15,10 +15,7 @@ from config import API_ID, API_HASH, BOT_TOKEN, BOT_NAME
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(BOT_NAME)
 
-# --- Dummy HTTP server ---
-# Railway (dan platform sejenis) kadang mengharapkan container listen di sebuah PORT.
-# Bot Telegram ini tidak butuh web server, tapi kita buka port kosong ini
-# supaya Railway tidak menganggap proses "tidak sehat" dan mematikannya.
+# --- Dummy HTTP Server untuk Railway Healthcheck ---
 class _HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -26,7 +23,7 @@ class _HealthHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"OK")
 
     def log_message(self, format, *args):
-        pass  # matikan log bawaan HTTP server biar tidak spam
+        pass  # Matikan spam log dari HTTP server bawaan
 
 def _start_dummy_server():
     port = int(os.environ.get("PORT", 8080))
@@ -39,8 +36,7 @@ threading.Thread(target=_start_dummy_server, daemon=True).start()
 SESSIONS_DIR = "/app/sessions"
 os.makedirs(SESSIONS_DIR, exist_ok=True)
 
-# PENTING: workdir menunjuk ke folder yang di-mount sebagai Volume di Railway
-# supaya session file (CosaMusicBot.session) persisten antar deploy/restart.
+# Client Pyrogram & PyTgCalls Initialization
 app = Client(
     "CosaMusicBotV2",
     api_id=API_ID,
@@ -50,14 +46,17 @@ app = Client(
 )
 call_py = PyTgCalls(app)
 
+# Dictionary untuk menyimpan antrean lagu tiap chat/grup
 queues = {}
 
 def get_audio_url(query: str):
+    """Fungsi pembantu sync untuk pencarian audio menggunakan yt_dlp."""
     import yt_dlp
     ydl_opts = {
         'format': 'bestaudio/best',
         'quiet': True,
         'noplaylist': True,
+        'default_search': 'ytsearch',
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(f"ytsearch:{query}", download=False)
@@ -68,19 +67,29 @@ def get_audio_url(query: str):
             raise Exception("Lagu tidak ditemukan.")
 
 async def leave_vc(chat_id: int):
+    """Fungsi pembantu untuk keluar dari panggilan suara."""
     try:
         await call_py.leave_call(chat_id)
     except Exception:
         pass
 
 async def play_next(chat_id: int):
+    """Memutar lagu berikutnya yang ada di antrean."""
     if chat_id in queues and len(queues[chat_id]) > 0:
         next_song = queues[chat_id].pop(0)
         url = next_song['url']
         title = next_song['title']
 
         try:
-            await call_py.play(chat_id, StreamType(url))
+            # Menggunakan API MediaStream resmi PyTgCalls v2.x
+            await call_py.play(
+                chat_id,
+                MediaStream(
+                    url,
+                    audio_parameters=AudioQuality.HIGH,
+                    video_parameters=None
+                )
+            )
 
             keyboard = InlineKeyboardMarkup([
                 [
@@ -110,10 +119,12 @@ async def play_next(chat_id: int):
             f"📭 <b>[{BOT_NAME}]</b> Antrean telah selesai. Bot keluar dari Voice Chat."
         )
 
+# Logging debug pesan masuk
 @app.on_message(filters.all, group=-1)
 async def debug_log_all(client, message):
     logger.info(f"DEBUG: pesan masuk dari chat_id={message.chat.id}, text={message.text!r}")
 
+# Handler Command /start
 @app.on_message(filters.command("start"))
 async def start_cmd(client, message):
     logger.info(f"DEBUG: /start diterima dari chat_id={message.chat.id}, user={message.from_user.id if message.from_user else 'unknown'}")
@@ -139,6 +150,7 @@ async def start_cmd(client, message):
     except Exception as e:
         logger.exception(f"ERROR saat memproses /start: {e}")
 
+# Handler Inline Button Callback
 @app.on_callback_query()
 async def callback_handler(client, callback_query):
     data = callback_query.data
@@ -200,6 +212,7 @@ async def callback_handler(client, callback_query):
     except Exception as e:
         logger.exception(f"ERROR di callback_handler (data={data}): {e}")
 
+# Handler Command /play
 @app.on_message(filters.command("play") & filters.group)
 async def play_cmd(client, message):
     if len(message.command) < 2:
@@ -210,31 +223,35 @@ async def play_cmd(client, message):
     status_msg = await message.reply_text(f"🔍 <i>[{BOT_NAME}] Mencari dan memproses lagu...</i>")
 
     try:
-        url, title = get_audio_url(query)
+        # Menjalankan fungsi yt_dlp secara asynchronous agar bot tidak membeku
+        url, title = await asyncio.to_thread(get_audio_url, query)
 
-        if chat_id not in queues:
-            queues[chat_id] = []
-
-        is_active = False
-        try:
-            calls = getattr(call_py, 'calls', {})
-            if chat_id in calls:
-                is_active = True
-        except Exception:
-            is_active = False
-
-        keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("⏭️ Skip", callback_data="btn_skip"),
-                InlineKeyboardButton("⏹️ Stop", callback_data="btn_stop")
-            ],
-            [
-                InlineKeyboardButton("📜 Cek Antrean", callback_data="btn_queue")
-            ]
-        ])
+        # Cek apakah bot sedang memainkan lagu aktif di grup ini
+        is_active = chat_id in queues
 
         if not is_active:
-            await call_py.play(chat_id, StreamType(url))
+            queues[chat_id] = []
+            
+            # Putar lagu menggunakan PyTgCalls v2.x
+            await call_py.play(
+                chat_id,
+                MediaStream(
+                    url,
+                    audio_parameters=AudioQuality.HIGH,
+                    video_parameters=None
+                )
+            )
+
+            keyboard = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("⏭️ Skip", callback_data="btn_skip"),
+                    InlineKeyboardButton("⏹️ Stop", callback_data="btn_stop")
+                ],
+                [
+                    InlineKeyboardButton("📜 Cek Antrean", callback_data="btn_queue")
+                ]
+            ])
+
             await status_msg.edit_text(
                 f"▶️ <b>[{BOT_NAME}] Memutar Sekarang:</b>\n🎵 <b>{title}</b>",
                 reply_markup=keyboard
@@ -242,6 +259,17 @@ async def play_cmd(client, message):
         else:
             queues[chat_id].append({"title": title, "url": url})
             pos = len(queues[chat_id])
+            
+            keyboard = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("⏭️ Skip", callback_data="btn_skip"),
+                    InlineKeyboardButton("⏹️ Stop", callback_data="btn_stop")
+                ],
+                [
+                    InlineKeyboardButton("📜 Cek Antrean", callback_data="btn_queue")
+                ]
+            ])
+
             await status_msg.edit_text(
                 f"➕ <b>[{BOT_NAME}] Ditambahkan ke Antrean (#{pos}):</b>\n🎵 <b>{title}</b>",
                 reply_markup=keyboard
@@ -250,12 +278,14 @@ async def play_cmd(client, message):
     except Exception as e:
         await status_msg.edit_text(f"❌ <b>[{BOT_NAME}] Gagal memutar lagu:</b> {e}")
 
+# Handler Command /skip
 @app.on_message(filters.command("skip") & filters.group)
 async def skip_cmd(client, message):
     chat_id = message.chat.id
     await message.reply_text(f"⏭️ <i>[{BOT_NAME}] Melewati lagu saat ini...</i>")
     await play_next(chat_id)
 
+# Handler Command /queue
 @app.on_message(filters.command("queue") & filters.group)
 async def queue_cmd(client, message):
     chat_id = message.chat.id
@@ -269,6 +299,7 @@ async def queue_cmd(client, message):
     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⏹️ Hentikan Pemutaran", callback_data="btn_stop")]])
     await message.reply_text(text, reply_markup=keyboard)
 
+# Handler Command /stop
 @app.on_message(filters.command("stop") & filters.group)
 async def stop_cmd(client, message):
     chat_id = message.chat.id
@@ -279,25 +310,22 @@ async def stop_cmd(client, message):
     await leave_vc(chat_id)
     await message.reply_text(f"⏹️ <b>[{BOT_NAME}] Musik dihentikan & bot keluar dari Voice Chat.</b>")
 
-# Event Handler pemutaran otomatis lagu berikutnya
+# Handler Event Pemutaran Otomatis Lagu Berikutnya saat lagu selesai
 @call_py.on_update(pytgcalls_filters.stream_end)
-async def stream_end_handler(client, update):
+async def stream_end_handler(_, update):
     chat_id = getattr(update, 'chat_id', None)
     if chat_id:
         await play_next(chat_id)
 
+# Main Entry Point
 async def main():
-    # Retry loop khusus untuk FloodWait saat login, supaya proses TIDAK crash
-    # dan Railway TIDAK auto-restart berkali-kali (yang justru memperparah flood).
     while True:
         try:
             await app.start()
             break
         except FloodWait as e:
             wait_time = e.value + 5
-            logger.warning(
-                f"⏳ Kena FloodWait dari Telegram. Menunggu {wait_time} detik sebelum mencoba lagi..."
-            )
+            logger.warning(f"⏳ Kena FloodWait dari Telegram. Menunggu {wait_time} detik...")
             await asyncio.sleep(wait_time)
         except Exception as e:
             logger.error(f"Gagal start client: {e}. Mencoba lagi dalam 15 detik...")
